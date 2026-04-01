@@ -4,6 +4,10 @@
 #include <RTC.h>
 #include <SPI.h>
 
+// CAN filter variables
+static uint32_t const CAN_FILTER_MASK_STANDARD = 0x1FFC0000;
+static uint32_t const CAN_FILTER_MASK_EXTENDED = 0x1FFFFFFF;
+
 // Serial input variables
 boolean newData = false;
 const byte NUM_CHARS = 32;
@@ -13,7 +17,7 @@ char receivedChars[NUM_CHARS];
 byte listState = 0;
 byte filterState = 0;
 const int NUM_ROWS = 5;
-const int NUM_COLS = 3;
+const int NUM_COLS = 4;
 char whitelist[NUM_ROWS][NUM_COLS] = {};
 char blacklist[NUM_ROWS][NUM_COLS] = {};
 
@@ -31,11 +35,11 @@ const int CHIP_SELECT = 10;
 
 // EEPROM variables
 int filterIndex = 0;
-int fileNumIndex = 1;
+int fileCountIndex = 1;
 int CANSpeedIndex = 2;
 int listStateIndex = 3;
 int whitelistIndex = 4;
-int blacklistIndex = whitelistIndex + NUM_ROWS*NUM_COLS - 1;
+int blacklistIndex = whitelistIndex + NUM_ROWS*NUM_COLS;
 
 // CANSpeed variables
 byte CANSpeed;
@@ -48,22 +52,29 @@ const int BUFFER_SIZE = 100;
 char msgBuffer[BUFFER_SIZE][MSG_LENGTH];
 
 void setup() {
-  // Read and update EEPROM
-  fileCount = EEPROM.read(fileNumIndex) + 1;
-  EEPROM.update(fileNumIndex, fileCount);
-  CANSpeed = EEPROM.read(CANSpeedIndex);
+  // Read & update values from the EEPROM
   filterState = EEPROM.read(filterIndex);
+  fileCount = EEPROM.read(fileCountIndex) + 1;
+  CANSpeed = EEPROM.read(CANSpeedIndex);
   listState = EEPROM.read(listStateIndex);
+  EEPROM.update(fileCountIndex, fileCount);
 
   // Start the 'real time' clock + Serial, CAN, & SD communication
   RTC.begin();
   Serial.begin(115200);
-  CAN.begin(1000000);
+  CAN.begin(CANSpeedArray[CANSpeed]);
   sd.begin(CHIP_SELECT, SD_SCK_MHZ(50));
 
   // Update white/blacklist from EEPROM
   updateList(whitelist, whitelistIndex);
   updateList(blacklist, blacklistIndex);
+
+  // Update filter states from EEPROM
+  if(listState == 0){
+    clearFilterIDs();
+  } else{
+    updateFilterIDs();
+  }
 }
 
 void loop() {
@@ -100,22 +111,35 @@ void loop() {
         break;
       case 'q':
         filterState = 1;
+        if(listState == 0){
+          clearFilterIDs();
+        } else{
+          updateFilterIDs();
+        }
+        EEPROM.update(listStateIndex, listState);
         EEPROM.update(filterIndex, filterState);
         break;
       case 'r':
         filterState = 0;
+        clearFilterIDs();
+        EEPROM.update(listStateIndex, listState);
         EEPROM.update(filterIndex, filterState);
         break;
       case 's':
         listState = 0;
+        clearFilterIDs();
         EEPROM.update(listStateIndex, listState);
+        EEPROM.update(filterIndex, filterState);
         break;
       case 't':
         listState = 1;
+        updateFilterIDs();
         EEPROM.update(listStateIndex, listState);
+        EEPROM.update(filterIndex, filterState);
         break;
       case 'u':
         readList(whitelist);
+        updateFilterIDs();
         break;
       case 'v':
         writeList(whitelist);
@@ -198,41 +222,68 @@ void updateCANSpeed(){
   EEPROM.update(CANSpeedIndex, CANSpeed);
 }
 
-// Check if the CAN msg passes the filter
-bool checkFilter(CanMsg msg){
-  bool filterPass;
+// Update the filter IDs from the whitelist
+void updateFilterIDs(){
+  clearFilterIDs();
+  CAN.setFilterMask_Extended(CAN_FILTER_MASK_EXTENDED);
+  CAN.setFilterMask_Standard(CAN_FILTER_MASK_STANDARD);
+
+  char standardArray[4];
+  char extendedArray[5];
+
+  for (int mailbox = 0; mailbox < R7FA4M1_CAN::CAN_MAX_NO_STANDARD_MAILBOXES; mailbox++){
+    if(whitelist[mailbox][3] == '-'){
+      snprintf(standardArray, sizeof(standardArray), "%c%c%c", whitelist[mailbox][0], whitelist[mailbox][1], whitelist[mailbox][2]);
+      standardArray[3] = '\0'; // Null-terminate
+      uint32_t canId = strtoul(standardArray, NULL, 16);
+      CAN.setFilterId_Standard(mailbox, canId);
+    } else {
+      snprintf(extendedArray, sizeof(extendedArray), "%c%c%c%c", whitelist[mailbox][0], whitelist[mailbox][1], whitelist[mailbox][2], whitelist[mailbox][3]);
+      extendedArray[4] = '\0'; // Null-terminate
+      uint32_t canId = strtoul(extendedArray, NULL, 16);
+      CAN.setFilterId_Extended(mailbox, canId);
+    }
+  }
+}
+
+// Clear the filter of IDs from the whitelist
+void clearFilterIDs(){
+  CAN.setFilterMask_Extended(0x0);
+  CAN.setFilterMask_Standard(0x0);
+  for (int mailbox = 0; mailbox < R7FA4M1_CAN::CAN_MAX_NO_EXTENDED_MAILBOXES; mailbox++) {
+    CAN.setFilterId_Extended(mailbox, 0); // Unused mailboxes
+  }
+  for (int mailbox = 0; mailbox < R7FA4M1_CAN::CAN_MAX_NO_STANDARD_MAILBOXES; mailbox++) {
+    CAN.setFilterId_Standard(mailbox, 0); // Unused mailboxes
+  }
+}
+
+// Check if the CAN msg passes the blacklist
+bool checkBlacklist(CanMsg msg){
+  bool filterPass = true;
   char msgIdStr[NUM_COLS + 1];
-  snprintf(msgIdStr, sizeof(msgIdStr), "%03X", msg.id); // Format ID as 3 hex chars
-      
-  if(listState == 1) { // whitelist mode
-    filterPass = false;
-    for(int i = 0; i < NUM_ROWS; i++) {
-      bool match = true;
-      for(int j = 0; j < NUM_COLS; j++) {
-        if(whitelist[i][j] != msgIdStr[j]) {
+  snprintf(msgIdStr, sizeof(msgIdStr), "%03X", msg.id);
+  for(int i = 0; i < NUM_ROWS; i++) {
+    bool match = true;
+    if(blacklist[i][3] == '-'){
+      for(int j = 0; j < NUM_COLS - 1; j++) {
+        if(blacklist[i][j] != msgIdStr[j]) {
           match = false;
           break;
         }
-      }
-      if(match) {
-        filterPass = true;
-        break;
-      }
-    }
-  } else { // blacklist mode
-    filterPass = true;
-    for(int i = 0; i < NUM_ROWS; i++) {
-      bool match = true;
+      } 
+    } else {
       for(int j = 0; j < NUM_COLS; j++) {
         if(blacklist[i][j] != msgIdStr[j]) {
           match = false;
           break;
         }
       }
-      if(match) {
-        filterPass = false;
-        break;
-      }
+    }
+    if(match){
+      filterPass = false;
+      break;
+    } else{
     }
   }
   return filterPass;
@@ -244,8 +295,8 @@ void logCAN(){
     CanMsg const MSG = CAN.read();
 
     bool filterPass = true;
-    if(filterState == 1){
-      filterPass = checkFilter(MSG);
+    if(filterState == 1 && listState == 0){
+      filterPass = checkBlacklist(MSG);
     }
 
     if(filterPass){
@@ -272,7 +323,7 @@ void flushBufferToSD() {
   // Create and open a new file
   String tempFileName = String(fileCount) + "_" + String(fileNum) + ".txt";
   if (!dataFile.isOpen()) {
-    dataFile = sd.open("tempFileName", O_WRONLY | O_CREAT | O_APPEND);
+    dataFile = sd.open(tempFileName, O_WRONLY | O_CREAT | O_APPEND);
   }
   // Print file header
   if(dataFile.size() == 0){
