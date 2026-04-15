@@ -48,7 +48,7 @@ int CANSpeedArray[4] = {125000, 250000, 500000, 1000000};
 // SD buffer variables
 int bufferIndex = 0;
 const int MSG_LENGTH = 100;
-const int BUFFER_SIZE = 100;
+const int BUFFER_SIZE = 150;
 char msgBuffer[BUFFER_SIZE][MSG_LENGTH];
 
 void setup() {
@@ -70,10 +70,10 @@ void setup() {
   updateList(blacklist, blacklistIndex);
 
   // Update filter states from EEPROM
-  if(listState == 0){
-    clearFilterIDs();
+  if(listState == 1){
+    setFilters();
   } else{
-    updateFilterIDs();
+    clearFilters();
   }
 }
 
@@ -87,6 +87,10 @@ void loop() {
   if(Serial.available()){
     char input = Serial.read();
     switch(input){
+      case 'k':
+        fileCount = 1;
+        EEPROM.update(fileCountIndex, fileCount);
+        break;
       case 'l':
         Serial.print(EEPROM.read(CANSpeedIndex));
         Serial.print(EEPROM.read(filterIndex));
@@ -111,35 +115,33 @@ void loop() {
         break;
       case 'q':
         filterState = 1;
-        if(listState == 0){
-          clearFilterIDs();
+        if(listState == 1){
+          setFilters();
         } else{
-          updateFilterIDs();
+          clearFilters();
         }
-        EEPROM.update(listStateIndex, listState);
         EEPROM.update(filterIndex, filterState);
         break;
       case 'r':
         filterState = 0;
-        clearFilterIDs();
-        EEPROM.update(listStateIndex, listState);
+        clearFilters();
         EEPROM.update(filterIndex, filterState);
         break;
       case 's':
         listState = 0;
-        clearFilterIDs();
+        clearFilters();
         EEPROM.update(listStateIndex, listState);
-        EEPROM.update(filterIndex, filterState);
         break;
       case 't':
         listState = 1;
-        updateFilterIDs();
+        setFilters();
         EEPROM.update(listStateIndex, listState);
-        EEPROM.update(filterIndex, filterState);
         break;
       case 'u':
         readList(whitelist);
-        updateFilterIDs();
+        if(listState == 1){
+          setFilters();
+        }
         break;
       case 'v':
         writeList(whitelist);
@@ -166,6 +168,50 @@ void loop() {
         break;
     }
   } 
+}
+
+void clearFilters(){
+  CAN.end();
+  CAN.setFilterMask_Extended(0x0);
+  CAN.setFilterMask_Standard(0x0);
+  CAN.begin(CANSpeedArray[CANSpeed]);
+}
+
+void setFilters(){
+  CAN.end();
+  int numMailboxes = 5;
+  CAN.setFilterMask_Extended(CAN_FILTER_MASK_EXTENDED);
+  CAN.setFilterMask_Standard(CAN_FILTER_MASK_STANDARD);
+
+  // Clear previous filters
+  for (int mailbox = 0; mailbox < numMailboxes; mailbox++) {
+    CAN.setFilterId_Extended(mailbox, 0);
+  }
+  for (int mailbox = 0; mailbox < numMailboxes; mailbox++) {
+    CAN.setFilterId_Standard(mailbox, 0);
+  }
+
+  // Set new filters
+  int standardIndex = 0;
+  int extendedIndex = 0;
+  char standardArray[4];
+  char extendedArray[5];
+  for (int mailbox = 0; mailbox < numMailboxes; mailbox++){
+    if(whitelist[mailbox][3] == '-'){
+      snprintf(standardArray, sizeof(standardArray), "%c%c%c", whitelist[mailbox][0], whitelist[mailbox][1], whitelist[mailbox][2]);
+      standardArray[3] = '\0'; // Null-terminate
+      uint32_t canId = strtoul(standardArray, NULL, 16);
+      CAN.setFilterId_Standard(standardIndex, canId);
+      standardIndex++;
+    } else {
+      snprintf(extendedArray, sizeof(extendedArray), "%c%c%c%c", whitelist[mailbox][0], whitelist[mailbox][1], whitelist[mailbox][2], whitelist[mailbox][3]);
+      extendedArray[4] = '\0'; // Null-terminate
+      uint32_t canId = strtoul(extendedArray, NULL, 16);
+      CAN.setFilterId_Extended(extendedIndex, canId);
+      extendedIndex++;
+    }
+  }
+  CAN.begin(CANSpeedArray[CANSpeed]);
 }
 
 // Read the white/blacklist from the serial monitor
@@ -220,42 +266,6 @@ void updateCANSpeed(){
   CAN.end();
   CAN.begin(CANSpeedArray[CANSpeed]);
   EEPROM.update(CANSpeedIndex, CANSpeed);
-}
-
-// Update the filter IDs from the whitelist
-void updateFilterIDs(){
-  clearFilterIDs();
-  CAN.setFilterMask_Extended(CAN_FILTER_MASK_EXTENDED);
-  CAN.setFilterMask_Standard(CAN_FILTER_MASK_STANDARD);
-
-  char standardArray[4];
-  char extendedArray[5];
-
-  for (int mailbox = 0; mailbox < R7FA4M1_CAN::CAN_MAX_NO_STANDARD_MAILBOXES; mailbox++){
-    if(whitelist[mailbox][3] == '-'){
-      snprintf(standardArray, sizeof(standardArray), "%c%c%c", whitelist[mailbox][0], whitelist[mailbox][1], whitelist[mailbox][2]);
-      standardArray[3] = '\0'; // Null-terminate
-      uint32_t canId = strtoul(standardArray, NULL, 16);
-      CAN.setFilterId_Standard(mailbox, canId);
-    } else {
-      snprintf(extendedArray, sizeof(extendedArray), "%c%c%c%c", whitelist[mailbox][0], whitelist[mailbox][1], whitelist[mailbox][2], whitelist[mailbox][3]);
-      extendedArray[4] = '\0'; // Null-terminate
-      uint32_t canId = strtoul(extendedArray, NULL, 16);
-      CAN.setFilterId_Extended(mailbox, canId);
-    }
-  }
-}
-
-// Clear the filter of IDs from the whitelist
-void clearFilterIDs(){
-  CAN.setFilterMask_Extended(0x0);
-  CAN.setFilterMask_Standard(0x0);
-  for (int mailbox = 0; mailbox < R7FA4M1_CAN::CAN_MAX_NO_EXTENDED_MAILBOXES; mailbox++) {
-    CAN.setFilterId_Extended(mailbox, 0); // Unused mailboxes
-  }
-  for (int mailbox = 0; mailbox < R7FA4M1_CAN::CAN_MAX_NO_STANDARD_MAILBOXES; mailbox++) {
-    CAN.setFilterId_Standard(mailbox, 0); // Unused mailboxes
-  }
 }
 
 // Check if the CAN msg passes the blacklist
