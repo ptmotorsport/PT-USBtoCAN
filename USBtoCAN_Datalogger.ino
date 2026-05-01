@@ -1,8 +1,24 @@
+#include <Adafruit_NeoPixel.h>
 #include <Arduino_CAN.h>
 #include <EEPROM.h>
 #include <SdFat.h>
 #include <RTC.h>
 #include <SPI.h>
+
+// NeoPixel variables
+int pwrLED = 0;
+int txLED = 1;
+int rxLED = 2;
+int errorLED = 3;
+int SDLED = 4;
+int neoPixelsPin = 3;
+int numNeoPixels = 5;
+int neoPixelsDelay = 500;
+int neoPixelsBrightness = 50;
+boolean txDelay = false;
+boolean rxDelay = false;
+boolean falseInput = false;
+Adafruit_NeoPixel pixels(numNeoPixels, neoPixelsPin, NEO_GRB + NEO_KHZ800);
 
 // CAN filter variables
 static uint32_t const CAN_FILTER_MASK_STANDARD = 0x1FFC0000;
@@ -10,6 +26,7 @@ static uint32_t const CAN_FILTER_MASK_EXTENDED = 0x1FFFFFFF;
 
 // Serial input variables
 boolean newData = false;
+boolean savvyCAN = false;
 const byte NUM_CHARS = 32;
 char receivedChars[NUM_CHARS];
 
@@ -62,8 +79,21 @@ void setup() {
   // Start the 'real time' clock + Serial, CAN, & SD communication
   RTC.begin();
   Serial.begin(115200);
-  CAN.begin(CANSpeedArray[CANSpeed]);
-  sd.begin(CHIP_SELECT, SD_SCK_MHZ(50));
+  if(CAN.begin(CANSpeedArray[CANSpeed])){
+    pixels.setPixelColor(errorLED, pixels.Color(0, 0, 0));
+  } else{
+    pixels.setPixelColor(errorLED, pixels.Color(neoPixelsBrightness, 0, 0));
+  }
+
+  // Start the NeoPixels
+  pixels.begin();
+  pixels.clear();
+  pixels.setPixelColor(pwrLED, pixels.Color(0, neoPixelsBrightness, 0));
+  if(sd.begin(CHIP_SELECT, SD_SCK_MHZ(50))){
+    pixels.setPixelColor(SDLED, pixels.Color(0, neoPixelsBrightness, 0));
+  } else{
+    pixels.setPixelColor(SDLED, pixels.Color(neoPixelsBrightness, 0, 0));
+  }
 
   // Update white/blacklist from EEPROM
   updateList(whitelist, whitelistIndex);
@@ -83,37 +113,73 @@ void loop() {
   currentMillis = millis();
   logCAN();
 
+  // Update the NeoPixel values
+  if(currentMillis - previousMillis > neoPixelsDelay){
+    if(txDelay){
+      pixels.setPixelColor(txLED, pixels.Color(0, neoPixelsBrightness, 0));
+    } else{
+      pixels.setPixelColor(txLED, pixels.Color(0, 0, 0));
+    }
+    if(rxDelay){
+      pixels.setPixelColor(rxLED, pixels.Color(0, neoPixelsBrightness, 0));
+    } else{
+      pixels.setPixelColor(rxLED, pixels.Color(0, 0, 0));
+    }
+    txDelay = false;
+    rxDelay = false;
+    previousMillis = currentMillis;
+    pixels.show();
+  }
+
   // Check for serial communication from VS
   if(Serial.available()){
     char input = Serial.read();
     switch(input){
+      case 'C':
+        rxDelay = true;
+        savvyCAN = true;
+        pixels.setPixelColor(SDLED, pixels.Color(0, 0, 0));
+        break;
       case 'k':
+        rxDelay = true;
         fileCount = 1;
         EEPROM.update(fileCountIndex, fileCount);
         break;
       case 'l':
+        rxDelay = true;
+        savvyCAN = false;
+        if(sd.begin(CHIP_SELECT, SD_SCK_MHZ(50))){
+          pixels.setPixelColor(SDLED, pixels.Color(0, neoPixelsBrightness, 0));
+        } else{
+          pixels.setPixelColor(SDLED, pixels.Color(neoPixelsBrightness, 0, 0));
+        }
         Serial.print(EEPROM.read(CANSpeedIndex));
         Serial.print(EEPROM.read(filterIndex));
         Serial.print(EEPROM.read(listStateIndex));
         Serial.print(">");
         break;
       case 'm':
+        rxDelay = true;
         CANSpeed = 0;
         updateCANSpeed();
         break;
       case 'n':
+        rxDelay = true;
         CANSpeed = 1;
         updateCANSpeed();
         break;
       case 'o':
+        rxDelay = true;
         CANSpeed = 2;
         updateCANSpeed();
         break;
       case 'p':
+        rxDelay = true;
         CANSpeed = 3;
         updateCANSpeed();
         break;
       case 'q':
+        rxDelay = true;
         filterState = 1;
         if(listState == 1){
           setFilters();
@@ -123,58 +189,74 @@ void loop() {
         EEPROM.update(filterIndex, filterState);
         break;
       case 'r':
+        rxDelay = true;
         filterState = 0;
         clearFilters();
         EEPROM.update(filterIndex, filterState);
         break;
       case 's':
+        rxDelay = true;
         listState = 0;
         clearFilters();
         EEPROM.update(listStateIndex, listState);
         break;
       case 't':
+        rxDelay = true;
         listState = 1;
         setFilters();
         EEPROM.update(listStateIndex, listState);
         break;
       case 'u':
+        rxDelay = true;
         readList(whitelist);
         if(listState == 1){
           setFilters();
         }
         break;
       case 'v':
+        rxDelay = true;
         writeList(whitelist);
         break;
       case 'w':
+        rxDelay = true;
         burnList(whitelist, whitelistIndex);
         break;
       case 'x':
+        rxDelay = true;
         readList(blacklist);
         break;
       case 'y':
+        rxDelay = true;
         writeList(blacklist);
         break;
       case 'z':
+        rxDelay = true;
         burnList(blacklist, blacklistIndex);
         break;
       case '1':
+        rxDelay = true;
         updateList(whitelist, whitelistIndex);
         break;
       case '2':
+        rxDelay = true;
         updateList(blacklist, blacklistIndex);
         break;
       default:
+        falseInput = true;
         break;
     }
-  } 
+  }
 }
 
 void clearFilters(){
   CAN.end();
   CAN.setFilterMask_Extended(0x0);
   CAN.setFilterMask_Standard(0x0);
-  CAN.begin(CANSpeedArray[CANSpeed]);
+  if(CAN.begin(CANSpeedArray[CANSpeed])){
+    pixels.setPixelColor(errorLED, pixels.Color(0, 0, 0));
+  } else{
+    pixels.setPixelColor(errorLED, pixels.Color(neoPixelsBrightness, 0, 0));
+  }
 }
 
 void setFilters(){
@@ -211,7 +293,11 @@ void setFilters(){
       extendedIndex++;
     }
   }
-  CAN.begin(CANSpeedArray[CANSpeed]);
+  if(CAN.begin(CANSpeedArray[CANSpeed])){
+    pixels.setPixelColor(errorLED, pixels.Color(0, 0, 0));
+  } else{
+    pixels.setPixelColor(errorLED, pixels.Color(neoPixelsBrightness, 0, 0));
+  }
 }
 
 // Read the white/blacklist from the serial monitor
@@ -228,6 +314,7 @@ void readList(char list[NUM_ROWS][NUM_COLS]){
 
 // Write the white/blacklist to the serial monitor
 void writeList(char list[NUM_ROWS][NUM_COLS]){
+  txDelay = true;
   for(int i = 0; i < NUM_ROWS; i++){
     for(int j = 0; j < NUM_COLS; j++){
       Serial.print(list[i][j]);
@@ -264,7 +351,11 @@ void updateList(char list[NUM_ROWS][NUM_COLS], int index){
 // Update the CANBus speed
 void updateCANSpeed(){
   CAN.end();
-  CAN.begin(CANSpeedArray[CANSpeed]);
+  if(CAN.begin(CANSpeedArray[CANSpeed])){
+    pixels.setPixelColor(errorLED, pixels.Color(0, 0, 0));
+  } else{
+    pixels.setPixelColor(errorLED, pixels.Color(neoPixelsBrightness, 0, 0));
+  }
   EEPROM.update(CANSpeedIndex, CANSpeed);
 }
 
@@ -309,7 +400,7 @@ void logCAN(){
       filterPass = checkBlacklist(MSG);
     }
 
-    if(filterPass){
+    if(filterPass && !savvyCAN){
       char line[MSG_LENGTH];
       int len = snprintf(line, MSG_LENGTH, "%lu,%03X,%d,Rx,0,%d", currentMillis, MSG.id, MSG.isExtendedId(), MSG.data_length);
       for (int i = 0; i < byte(MSG.data_length); i++){
@@ -324,6 +415,18 @@ void logCAN(){
       if (++bufferIndex >= BUFFER_SIZE){
         flushBufferToSD();
       }
+    } else if (savvyCAN){
+      Serial.print("t");
+      Serial.print(MSG.id, HEX);
+      Serial.print(MSG.data_length, HEX);
+
+      for(int i = 0; i < byte(MSG.data_length); i++){
+        if(byte(MSG.data[i]) < 0x10){
+          Serial.print(0);
+        }
+        Serial.print(MSG.data[i], HEX);
+      }
+      Serial.print("\r");
     }
   }
 }
