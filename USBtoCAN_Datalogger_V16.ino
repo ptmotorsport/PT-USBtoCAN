@@ -14,7 +14,7 @@ int SDLED = 4;
 int neoPixelsPin = 3;
 int numNeoPixels = 5;
 int neoPixelsDelay = 500;
-int neoPixelsBrightness = 50;
+int neoPixelsBrightness = 25;
 boolean txDelay = false;
 boolean rxDelay = false;
 boolean falseInput = false;
@@ -100,7 +100,7 @@ void setup() {
   updateList(blacklist, blacklistIndex);
 
   // Update filter states from EEPROM
-  if(listState == 1){
+  if(listState == 1 && filterState == 1){
     setFilters();
   } else{
     clearFilters();
