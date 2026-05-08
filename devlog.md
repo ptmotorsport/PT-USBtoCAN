@@ -30,3 +30,8 @@ __05/05/2026:__
 * Designed 12-position rotary switch PCB
 * Debugged and fixed USBtoCAN boards (SD card readers & NeoPixels)
 * Took one USBtoCAN for uni motorsports team to test
+
+__08/05/2026:__
+* Designed 8-position (circle) and 8-position (square) switch PCBs
+* Started working on configuration files for DingoPDM Configurator on PTPDSS
+* Fixed tolerance issues on rotary switch boards
