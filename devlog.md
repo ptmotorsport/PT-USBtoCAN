@@ -35,3 +35,12 @@ __08/05/2026:__
 * Designed 8-position (circle) and 8-position (square) switch PCBs
 * Started working on configuration files for DingoPDM Configurator on PTPDSS
 * Fixed tolerance issues on rotary switch boards
+
+__14/05/2026:__
+* Started work on designing buck-boost converter pcb
+* Looked at porting Dingo_FW over to renesas chips to work with ptpdss boards
+
+__15/05/2026:__
+* Implemented reverse polarity protection, load dump protection, etc. for buck-boost converter
+* Continued porting Dingo_FW to renesas
+* Looked at using CAN msgs to communicate between Dingo and PTPDSS
