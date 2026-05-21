@@ -128,6 +128,7 @@ void loop() {
     txDelay = false;
     rxDelay = false;
     previousMillis = currentMillis;
+    if(Serial.dtr()){} // SavvyCAN check
     pixels.show();
   }
 
