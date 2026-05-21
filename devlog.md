@@ -40,6 +40,9 @@ __14/05/2026:__
 * Started work on designing buck-boost converter pcb
 * Looked at porting Dingo_FW over to renesas chips to work with ptpdss boards
 
+__21/05/2026:__
+* Fixed SavvyCAN not initalising bug for USBtoCAN (check if dtr is enabled)
+* Designed buck-boost converter (can't use pot as other components are dependent, datasheet calcs)
 __15/05/2026:__
 * Implemented reverse polarity protection, load dump protection, etc. for buck-boost converter
 * Continued porting Dingo_FW to renesas
