@@ -48,3 +48,7 @@ __15/05/2026:__
 __21/05/2026:__
 * Fixed SavvyCAN not initalising bug for USBtoCAN (check if dtr is enabled)
 * Designed buck-boost converter (can't use pot as other components are dependent, datasheet calcs)
+
+__05/06/2026:__
+* Fixed buck-boost converter V2
+* Worked on Dingo Config communication w/ PT boards
