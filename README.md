@@ -1,4 +1,4 @@
-# RA4M1-Custom Arduino Board Package
+# PT Motorsport USBtoCAN
 
 ## Overview
 
